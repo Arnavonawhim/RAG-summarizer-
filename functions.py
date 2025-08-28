@@ -9,6 +9,7 @@ import time
 #--logging configuration-
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
 #--import--
 from utils import (
         InMemoryVectorStore, load_document, chunk_document, generate_embeddings,
@@ -308,178 +309,91 @@ def sidebar():
         else:
             st.warning("No knowledge base loaded")
 
+# functions.py
+
 def querry():
-    #--Chat header--
-    st.markdown('<h4 style="font-size: 1.2rem;">Chat Interface</h4>', unsafe_allow_html=True)
+    """Handles user query input, voice input, and initiates processing"""
+    
+    st.markdown("---")
+    st.markdown("#### 💬 Chat with your documents")
 
-    # --- Input row (text + optional voice button) ---
-    col1, col2 = st.columns([4, 1])
-    with col1:
-        user_query = st.text_input(
-            "Ask your question:",
-            value=st.session_state.get('voice_input_text', ''),
-            placeholder="Type your question here or use voice input...",
-            help="Enter your question about the documents",
-            key="main_query_input",
-        )
-    with col2:
-        if VOICE_FEATURES_AVAILABLE:
-            st.markdown('<div class="voice-input-container">', unsafe_allow_html=True)
-            if not st.session_state.get('is_recording', False):
-                if st.button("🎤 Voice Input", use_container_width=True, type="primary"):
-                    st.session_state.is_recording = True
-                    st.rerun()
-            else:
-                st.button("🔴 Recording...", disabled=True, use_container_width=True)
-                with st.spinner("Listening... (13 seconds)"):
-                    audio_data = record_audio_from_mic(duration=13)
-                if audio_data:
-                    with st.spinner("Converting speech to text..."):
-                        transcribed_text = transcribe_audio(audio_data)
+    # Use a form for the input and button
+    with st.form(key='query_form', clear_on_submit=True):
+        col1, col2 = st.columns([10, 1])
+        
+        with col1:
+            user_query = st.text_input(
+                "Ask a question about your documents:",
+                key="user_query_input",
+                placeholder="e.g., What are the main findings?",
+                label_visibility="collapsed"
+            )
+        
+        with col2:
+            submit_button = st.form_submit_button("Ask")
+
+    # Voice input section - FIXED
+    col_mic, col_info = st.columns([1, 10])
+    with col_mic:
+        if st.button("🎤"):
+            with st.spinner("Recording... Please speak clearly. Click the button again to stop."):
+                try:
+                    # Record and transcribe audio
+                    audio_file_path = record_audio_from_mic()
+                    transcribed_text = transcribe_audio(audio_file_path)
+                    
                     if transcribed_text:
-                        st.session_state.voice_input_text = transcribed_text
-                        st.success(f"Voice recognized: **{transcribed_text}**")
-                        st.session_state.is_recording = False
-                        st.rerun()
+                        st.session_state.user_query_input = transcribed_text
+                        # Use experimental_rerun to update the text_input field immediately
+                        st.experimental_rerun()
                     else:
-                        st.error("Failed to transcribe audio. Please try again.")
-                st.session_state.is_recording = False
-                st.rerun()
-            st.markdown('</div>', unsafe_allow_html=True)
+                        st.warning("Could not understand audio or no speech detected.")
+                except Exception as e:
+                    logger.error(f"Error during voice input processing: {e}")
+                    st.error("An error occurred during voice input. Please ensure your microphone is properly configured.")
 
-    # --- Guards ---
-    if not user_query or not user_query.strip():
-        return
-    if not hasattr(st.session_state, 'vector_store') or st.session_state.vector_store is None:
-        st.error("🔧 System not initialized. Please refresh the page.")
-        return
-    if not hasattr(st.session_state.vector_store, 'chunks_data') or len(st.session_state.vector_store.chunks_data) == 0:
-        st.error("📚 No documents loaded. Please upload and process documents first!")
-        return
+    # Processing logic for both text and voice input
+    final_query_to_process = user_query if submit_button and user_query else None
+    
+    if 'user_query_input' in st.session_state and st.session_state.user_query_input:
+        # This handles the case where voice input populated the text box
+        final_query_to_process = st.session_state.user_query_input
+        # Clear it after use to prevent re-submission on refresh
+        st.session_state.user_query_input = ""
 
-    # Track unique ID for this query and mark as processed
-    current_query_key = f"{user_query.strip()}_{st.session_state.get('query_counter', 0)}"
-    st.session_state.query_counter = st.session_state.get('query_counter', 0) + 1
-    st.session_state.last_processed_query = user_query.strip()
 
-    # --- Build the answer ---
-    with st.spinner("🧠 Thinking and searching documents..."):
-        if not st.session_state.get('embedding_model_loaded', False):
-            assistant_response = "⚠️ Embedding model not loaded. Please check system configuration."
-        else:
+    if final_query_to_process:
+        if not st.session_state.get('vector_store') or not st.session_state.vector_store.get_all_chunks():
+            st.warning("Please process some documents first before asking a question.")
+            return
+
+        with st.spinner("Thinking..."):
             try:
-                query_embedding = embedding_model.encode([user_query])[0]
-                rewritten_query = rewrite_query(user_query)
-
-                candidate_chunks = hybrid_search(
-                    rewritten_query,
-                    st.session_state.vector_store,
-                    st.session_state.vector_store.chunks_data,
-                    embedding_model,
-                    k_semantic=7,
-                    k_keyword=7,
-                )
-                retrieved_chunks = rerank_chunks(rewritten_query, candidate_chunks, top_k_reranked=7)
-
-                if retrieved_chunks:
-                    initial_response = generate_structured_answer_with_gemini(
-                        rewritten_query,
-                        retrieved_chunks,
-                        query_embedding,
-                        st.session_state.vector_store.chunks_data,
-                        rerank_top_k=7,
-                    )
-                    assistant_response = refine_answer_with_gemini(initial_response)
-
-                    # Metrics
-                    retrieval_metrics = calculate_retrieval_metrics(user_query, retrieved_chunks, query_embedding)
-                    response_metrics = calculate_response_metrics(assistant_response, user_query, retrieved_chunks)
-                    st.session_state.last_query_metrics = {'retrieval': retrieval_metrics, 'response': response_metrics}
-                else:
-                    assistant_response = (
-                        "🔍 I couldn't find relevant information in the loaded documents. "
-                        "Please try rephrasing your question or check if the relevant documents are loaded."
-                    )
-            except Exception as e:
-                logger.error(f"Query processing error: {e}")
-                assistant_response = f"⚠️ An error occurred while processing your query: {str(e)}"
-
-    #--querry processing--
-    new_user_msg = {"role": "user", "content": user_query, "id": current_query_key}
-    new_assistant_msg = {"role": "assistant", "content": assistant_response, "id": f"resp_{current_query_key}"}
-
-    existing_ids = [msg.get("id") for msg in st.session_state.get('chat_history', [])]
-    if current_query_key not in existing_ids and f"resp_{current_query_key}" not in existing_ids:
-        if 'chat_history' not in st.session_state:
-            st.session_state.chat_history = []
-        # Insert so order is: user, then assistant
-        st.session_state.chat_history.insert(0, new_assistant_msg)
-        st.session_state.chat_history.insert(0, new_user_msg)
-
-    # Clear voice input text after processing
-    if st.session_state.get('voice_input_text'):
-        st.session_state.voice_input_text = ""
-
-    # --TTS--
-    if (
-        st.session_state.get('tts_enabled', False)
-        and TTS_AVAILABLE
-        and assistant_response
-        and assistant_response.strip()
-        and not any(k in assistant_response.lower() for k in ['error', 'failed', 'no documents'])
-    ):
-        try:
-            clean_text = re.sub(r'[*_#>`\[\]()]', '', assistant_response)
-            clean_text = re.sub(r'http[s]?://[^\s]+', '', clean_text)
-            clean_text = re.sub(r'\s+', ' ', clean_text).strip()
-
-            if len(clean_text) > 10:
-                truncated_text = clean_text[:800]
-                notice = None
-                if len(clean_text) > 800:
-                    notice = "⚠️ Text truncated to 800 characters for audio"
-
-                # FIXED: Handle different TTS modes properly
-                current_mode = st.session_state.get('tts_mode', 'gtts')
+                # Add user query to messages
+                st.session_state.messages.append({"role": "user", "content": final_query_to_process})
                 
-                if current_mode == 'javascript':
-                    # JavaScript TTS - returns speech_id
-                    speech_id = synthesize_speech(
-                        truncated_text,
-                        language=st.session_state.get("audio_language", "en"),
-                        slow=st.session_state.get("audio_speed", False),
-                    )
-                    
-                    # For JavaScript TTS, the audio player is already created
-                    if speech_id and st.session_state.chat_history:
-                        latest_msg = st.session_state.chat_history[0]
-                        if latest_msg["role"] == "assistant":
-                            latest_msg["audio_id"] = speech_id
-                            if notice:
-                                latest_msg["truncated_notice"] = notice
-                                
-                else:  # gTTS mode
-                    # gTTS - returns file_path and automatically creates player
-                    file_path = synthesize_speech(
-                        truncated_text,
-                        language=st.session_state.get("audio_language", "en"),
-                        slow=st.session_state.get("audio_speed", False),
-                    )
-                    
-                    # For gTTS, the audio player is automatically created in synthesize_speech
-                    # Just store the file path in chat history for reference
-                    if file_path and st.session_state.chat_history:
-                        latest_msg = st.session_state.chat_history[0]
-                        if latest_msg["role"] == "assistant":
-                            latest_msg["audio_file"] = file_path
-                            if notice:
-                                latest_msg["truncated_notice"] = notice
+                # Generate answer using the RAG pipeline
+                answer, sources, rag_metrics = generate_structured_answer_with_gemini(
+                    final_query_to_process, st.session_state.vector_store
+                )
+                
+                # Add assistant response to messages
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": answer,
+                    "sources": sources,
+                    "metrics": rag_metrics
+                })
 
-        except Exception as e:
-            logger.error(f"TTS Error: {e}")
-            st.error(f"Audio generation failed: {e}")
+                # Append to plain chat history for the model's reference
+                st.session_state.chat_history.append({"role": "user", "parts": [final_query_to_process]})
+                st.session_state.chat_history.append({"role": "model", "parts": [answer]})
 
+            except Exception as e:
+                logger.error(f"Error generating answer: {e}")
+                st.error(f"An error occurred while generating the answer: {e}")
 
+                
 def chat_history():
     """Render stored chat messages with proper formatting and optional audio response."""
     if "chat_history" not in st.session_state:
