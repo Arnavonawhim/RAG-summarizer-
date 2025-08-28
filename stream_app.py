@@ -1,64 +1,52 @@
+
 """
 RAG Prototype - Streamlit Application
-
 This module provides a user-friendly web interface for the RAG pipeline
 """
 
 import streamlit as st
 import os
-import re
-import uuid
 import logging
-import tempfile
-import time
-os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
+
+# =============================================================================
+# CONFIGURATION AND INITIALIZATION
+# =============================================================================
+
 # Configure logging
+os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-from utils import (
-        InMemoryVectorStore, embedding_model
-    )
-
-try:
-    from voice_utils import (
-        initialize_voice_state,create_gtts_audio_player,
-        create_voice_settings_interface,
-        get_system_audio_info,switch_to_js_tts,
-        TTS_AVAILABLE, AUDIO_PLAYBACK_AVAILABLE, synthesize_speech,
-        record_audio_from_mic, transcribe_audio,create_js_tts_player
-    )
-    logger.info("Successfully imported voice utilities with JavaScript TTS")
-    VOICE_FEATURES_AVAILABLE = True
-except ImportError as e:
-    logger.error(f"Voice utilities not available: {e}")
-    TTS_AVAILABLE = False
-    AUDIO_PLAYBACK_AVAILABLE = False
-    VOICE_FEATURES_AVAILABLE = False
-    
-if 'vector_store' not in st.session_state:
-    st.session_state.vector_store = InMemoryVectorStore()
+# --- SESSION STATE INITIALIZATION ---
+# This block MUST run before any other code.
+# It ensures all keys exist in st.session_state, preventing AttributeErrors.
 if 'embedding_model_loaded' not in st.session_state:
-    st.session_state.embedding_model_loaded = embedding_model is not None
+    st.session_state.embedding_model_loaded = False
+if 'vector_store' not in st.session_state:
+    st.session_state.vector_store = None
+if 'messages' not in st.session_state:
+    st.session_state.messages = []
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
-if 'current_embeddings_name' not in st.session_state:
-    st.session_state.current_embeddings_name = None
-if 'last_query_metrics' not in st.session_state:
-    st.session_state.last_query_metrics = None
-if 'last_processed_query' not in st.session_state:
-    st.session_state.last_processed_query = ""
-if 'query_counter' not in st.session_state:
-    st.session_state.query_counter = 0
-if VOICE_FEATURES_AVAILABLE:
-    initialize_voice_state()
+if 'user_query_input' not in st.session_state:
+    st.session_state.user_query_input = ""
+# Initialize voice-related states if they are used elsewhere
+if 'tts_enabled' not in st.session_state:
+    st.session_state.tts_enabled = True # Default to on
+if 'current_tts_mode' not in st.session_state:
+    st.session_state.current_tts_mode = 'js' # Default to browser-based TTS
+
+# =============================================================================
+# IMPORTS
+# =============================================================================
 
 try:
     from functions import (css, config, main_title, sidebar, querry, chat_history, tts_settings, Systeminfo, Footer)
-    logger.info("Successfully imported functions")
+    from voice_utils import TTS_AVAILABLE
+    logger.info("Successfully imported functions and voice utilities")
 except ImportError as e:
-    logger.error(f"Failed to import functions: {e}")
-    st.error(f"Required functions missing: {e}")
+    logger.error(f"Failed to import a required module: {e}")
+    st.error(f"A critical component is missing. Please check the logs. Error: {e}")
     st.stop()
 
 # Import voice utilities (now with JavaScript TTS)
