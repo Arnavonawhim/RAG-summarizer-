@@ -52,8 +52,6 @@ pytest>=7.4.0
 black>=23.7.0
 flake8>=6.0.0
 
----
-
 # setup_instructions.md - Complete setup guide
 
 ## RAG Prototype Setup Instructions
