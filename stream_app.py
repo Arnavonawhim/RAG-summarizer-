@@ -16,8 +16,45 @@ os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+from utils import (
+        InMemoryVectorStore, embedding_model
+    )
+
 try:
-    from functions import(css,config,main_title,sidebar,querry,chat_history,tts_settings,Systeminfo,Footer)
+    from voice_utils import (
+        initialize_voice_state,create_gtts_audio_player,
+        create_voice_settings_interface,
+        get_system_audio_info,switch_to_js_tts,
+        TTS_AVAILABLE, AUDIO_PLAYBACK_AVAILABLE, synthesize_speech,
+        record_audio_from_mic, transcribe_audio,create_js_tts_player
+    )
+    logger.info("Successfully imported voice utilities with JavaScript TTS")
+    VOICE_FEATURES_AVAILABLE = True
+except ImportError as e:
+    logger.error(f"Voice utilities not available: {e}")
+    TTS_AVAILABLE = False
+    AUDIO_PLAYBACK_AVAILABLE = False
+    VOICE_FEATURES_AVAILABLE = False
+    
+if 'vector_store' not in st.session_state:
+    st.session_state.vector_store = InMemoryVectorStore()
+if 'embedding_model_loaded' not in st.session_state:
+    st.session_state.embedding_model_loaded = embedding_model is not None
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
+if 'current_embeddings_name' not in st.session_state:
+    st.session_state.current_embeddings_name = None
+if 'last_query_metrics' not in st.session_state:
+    st.session_state.last_query_metrics = None
+if 'last_processed_query' not in st.session_state:
+    st.session_state.last_processed_query = ""
+if 'query_counter' not in st.session_state:
+    st.session_state.query_counter = 0
+if VOICE_FEATURES_AVAILABLE:
+    initialize_voice_state()
+
+try:
+    from functions import (css, config, main_title, sidebar, querry, chat_history, tts_settings, Systeminfo, Footer)
     logger.info("Successfully imported functions")
 except ImportError as e:
     logger.error(f"Failed to import functions: {e}")
