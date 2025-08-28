@@ -38,6 +38,7 @@ except ImportError as e:
 try:
     import pygame
     PYGAME_AVAILABLE = True
+    # AFTER THE FIX (replace the lines above with this)
     try:
         pygame.mixer.pre_init(frequency=22050, size=-16, channels=2, buffer=512)
         pygame.mixer.init()
