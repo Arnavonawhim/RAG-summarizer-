@@ -38,9 +38,13 @@ except ImportError as e:
 try:
     import pygame
     PYGAME_AVAILABLE = True
-    pygame.mixer.pre_init(frequency=22050, size=-16, channels=2, buffer=512)
-    pygame.mixer.init()
-    logger.info("Pygame available - enhanced audio playback enabled")
+    try:
+        pygame.mixer.pre_init(frequency=22050, size=-16, channels=2, buffer=512)
+        pygame.mixer.init()
+        logger.info("Pygame mixer initialized successfully.")
+    except pygame.error as e:
+        PYGAME_AVAILABLE = False # Make sure to disable it if it fails
+        logger.warning(f"Pygame mixer could not be initialized: {e}. Audio playback will fall back to browser.")
 except ImportError:
     PYGAME_AVAILABLE = False
     logger.info("Pygame not available - using Streamlit audio player only")
