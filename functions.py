@@ -310,89 +310,70 @@ def sidebar():
             st.warning("No knowledge base loaded")
 
 # functions.py
+# functions.py
 
 def querry():
-    """Handles user query input, voice input, and initiates processing"""
+    """Handles user query input, voice input, and initiates processing with a clean layout."""
     
     st.markdown("---")
     st.markdown("#### 💬 Chat with your documents")
 
-    # Use a form for the input and button
+    # --- Restore the clean text input and button layout using a form ---
     with st.form(key='query_form', clear_on_submit=True):
-        col1, col2 = st.columns([10, 1])
-        
+        col1, col2 = st.columns([0.9, 0.1])
         with col1:
             user_query = st.text_input(
-                "Ask a question about your documents:",
-                key="user_query_input",
+                "Ask a question:",
+                value=st.session_state.user_query_input,
                 placeholder="e.g., What are the main findings?",
-                label_visibility="collapsed"
+                label_visibility="collapsed",
+                key="query_text_input"
             )
-        
         with col2:
-            submit_button = st.form_submit_button("Ask")
+            submit_button = st.form_submit_button(label="Ask")
 
-    # Voice input section - FIXED
-    col_mic, col_info = st.columns([1, 10])
-    with col_mic:
-        if st.button("🎤"):
-            with st.spinner("Recording... Please speak clearly. Click the button again to stop."):
-                try:
-                    # Record and transcribe audio
-                    audio_file_path = record_audio_from_mic()
-                    transcribed_text = transcribe_audio(audio_file_path)
-                    
-                    if transcribed_text:
-                        st.session_state.user_query_input = transcribed_text
-                        # Use experimental_rerun to update the text_input field immediately
-                        st.experimental_rerun()
-                    else:
-                        st.warning("Could not understand audio or no speech detected.")
-                except Exception as e:
-                    logger.error(f"Error during voice input processing: {e}")
-                    st.error("An error occurred during voice input. Please ensure your microphone is properly configured.")
-
-    # Processing logic for both text and voice input
-    final_query_to_process = user_query if submit_button and user_query else None
+    # --- Place the microphone button cleanly below the form ---
+    if st.button("🎤 Use Voice Input"):
+        with st.spinner("Recording... Speak now. Recording will stop automatically."):
+            try:
+                audio_file_path = record_audio_from_mic()
+                transcribed_text = transcribe_audio(audio_file_path)
+                
+                if transcribed_text:
+                    # Update the session state and rerun to show text in the box
+                    st.session_state.user_query_input = transcribed_text
+                    st.rerun()
+                else:
+                    st.warning("Could not understand audio or no speech was detected.")
+            except Exception as e:
+                logger.error(f"Error during voice input processing: {e}")
+                st.error("An error occurred with voice input. Please check mic permissions.")
     
-    if 'user_query_input' in st.session_state and st.session_state.user_query_input:
-        # This handles the case where voice input populated the text box
-        final_query_to_process = st.session_state.user_query_input
-        # Clear it after use to prevent re-submission on refresh
-        st.session_state.user_query_input = ""
-
-
-    if final_query_to_process:
+    # --- Process the query on submission ---
+    if submit_button and user_query:
+        st.session_state.user_query_input = "" # Clear state after submission
         if not st.session_state.get('vector_store') or not st.session_state.vector_store.get_all_chunks():
-            st.warning("Please process some documents first before asking a question.")
+            st.warning("Please process documents before asking a question.")
             return
 
         with st.spinner("Thinking..."):
             try:
-                # Add user query to messages
-                st.session_state.messages.append({"role": "user", "content": final_query_to_process})
-                
-                # Generate answer using the RAG pipeline
+                st.session_state.messages.append({"role": "user", "content": user_query})
                 answer, sources, rag_metrics = generate_structured_answer_with_gemini(
-                    final_query_to_process, st.session_state.vector_store
+                    user_query, st.session_state.vector_store
                 )
-                
-                # Add assistant response to messages
                 st.session_state.messages.append({
                     "role": "assistant",
-                    "content": answer,
-                    "sources": sources,
-                    "metrics": rag_metrics
+                    "content": answer, "sources": sources, "metrics": rag_metrics
                 })
-
-                # Append to plain chat history for the model's reference
-                st.session_state.chat_history.append({"role": "user", "parts": [final_query_to_process]})
-                st.session_state.chat_history.append({"role": "model", "parts": [answer]})
-
+                st.session_state.chat_history.extend([
+                    {"role": "user", "parts": [user_query]},
+                    {"role": "model", "parts": [answer]}
+                ])
+                st.rerun() # Rerun to display the new message
             except Exception as e:
                 logger.error(f"Error generating answer: {e}")
                 st.error(f"An error occurred while generating the answer: {e}")
-
                 
 def chat_history():
     """Render stored chat messages with proper formatting and optional audio response."""
